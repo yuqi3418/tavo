@@ -50,11 +50,6 @@ app.get(["/", "/generate"], async (req, res) => {
     width = Math.round(width / 64) * 64;
     height = Math.round(height / 64) * 64;
 
-    // ==========================================
-    // 【核心修改区：绝对锁定历史图片】
-    // 只用 tag (也就是 Tavo 里的 $1) 来计算缓存指纹！
-    // 彻底无视 model, steps, scale, artist 等所有其他参数的变化。
-    // ==========================================
     const hashStr = req.query.tag || "empty_tag";
     const cacheHash = crypto.createHash('md5').update(hashStr).digest('hex');
     const fileName = `${cacheHash}.png`;
@@ -69,11 +64,15 @@ app.get(["/", "/generate"], async (req, res) => {
     if (!nocache) {
       const checkGitRes = await fetch(gitApiUrl, { headers: gitHeaders });
       if (checkGitRes.status === 200) {
-        console.log(`命中极速缓存 (Tag: ${hashStr}): 返回 ${fileName}`);
-        const gitData = await checkGitRes.json();
-        if (gitData.download_url) {
-          return res.redirect(302, gitData.download_url);
-        }
+        console.log(`命中极速缓存 (Tag: ${hashStr}): 准备通过 CDN 返回 ${fileName}`);
+        
+        // ==========================================
+        // 【CDN 提速核心代码】
+        // 彻底抛弃 GitHub 原始龟速链接，换用 jsDelivr 全球加速
+        // 格式: https://cdn.jsdelivr.net/gh/用户名/仓库名/文件路径
+        // ==========================================
+        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GIT_REPO}/${filePath}`;
+        return res.redirect(302, cdnUrl);
       }
     }
 
@@ -113,7 +112,6 @@ app.get(["/", "/generate"], async (req, res) => {
     const imgBuffer = await imageFiles[0].async("nodebuffer");
     const base64Img = imgBuffer.toString('base64');
     
-    // 【修改点】：如果 GitHub 里已经有旧图，允许强行覆盖上传 (用于 nocache=1 时)
     let sha = undefined;
     if (nocache) {
         const checkExist = await fetch(gitApiUrl, { headers: gitHeaders });
@@ -128,7 +126,7 @@ app.get(["/", "/generate"], async (req, res) => {
       body: JSON.stringify({
         message: `Auto-upload/Update: ${fileName}`,
         content: base64Img,
-        sha: sha // 如果强制刷新，带上旧文件的 sha 以覆盖
+        sha: sha 
       })
     }).catch(err => console.error("Git 上传异常:", err.message));
 
