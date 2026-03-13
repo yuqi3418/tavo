@@ -25,16 +25,17 @@ app.get(["/", "/generate"], async (req, res) => {
       return res.status(400).send("参数缺失：请检查 token, git_token, git_repo");
     }
 
-    const tag = req.query.tag || "1girl";
+    const tag = req.query.tag || "";
     const artist = req.query.artist || "";
     const finalInput = [tag, artist].filter(Boolean).join(", "); 
     
-    const model = req.query.model || "nai-diffusion-3";
-    const sampler = req.query.sampler || "k_euler";
+    const model = req.query.model || "nai-diffusion-4-5-full";
+    const sampler = req.query.sampler || "k_euler_ancestral";
     const steps = parseInt(req.query.steps) || 28;
     const scale = parseFloat(req.query.scale || req.query.cfg) || 5.0; 
-    const negative_prompt = req.query.negative || "nsfw, lowres";
-    const nocache = req.query.nocache === "1"; 
+    const negative_prompt = req.query.negative || "";
+    const noise_schedule = req.query.noise_schedule || "karras";
+    const nocache = req.query.nocache === "0"; 
 
     let width = 1024; let height = 1024;
     const sizeParam = req.query.size;
@@ -79,7 +80,7 @@ app.get(["/", "/generate"], async (req, res) => {
     console.log(`未命中缓存，开始用最新参数画新图 (Tag: ${hashStr})`);
 
     const isV4 = model.includes("nai-diffusion-4");
-    const aiParams = { width, height, steps, scale, sampler, negative_prompt };
+    const aiParams = { width, height, steps, scale, sampler, negative_prompt, noise_schedule };
 
     if (isV4) {
       aiParams.v4_prompt = { caption: { base_caption: finalInput, char_captions: [] } };
