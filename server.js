@@ -11,10 +11,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// 【修复 3】同时监听根目录和 /generate，防止路径错误
 app.get(["/", "/generate"], async (req, res) => {
   try {
-    // 防止浏览器空转直接访问报错
     if (Object.keys(req.query).length === 0) {
       return res.send("服务运行中，请通过 Tavo 传入参数调用。");
     }
@@ -52,7 +50,12 @@ app.get(["/", "/generate"], async (req, res) => {
     width = Math.round(width / 64) * 64;
     height = Math.round(height / 64) * 64;
 
-    const hashStr = `${finalInput}_${model}_${width}x${height}_${steps}_${scale}_${sampler}_${negative_prompt}`;
+    // ==========================================
+    // 【核心修改区：绝对锁定历史图片】
+    // 只用 tag (也就是 Tavo 里的 $1) 来计算缓存指纹！
+    // 彻底无视 model, steps, scale, artist 等所有其他参数的变化。
+    // ==========================================
+    const hashStr = req.query.tag || "empty_tag";
     const cacheHash = crypto.createHash('md5').update(hashStr).digest('hex');
     const fileName = `${cacheHash}.png`;
     const filePath = `images/${fileName}`; 
@@ -63,11 +66,10 @@ app.get(["/", "/generate"], async (req, res) => {
       'User-Agent': 'Tavo-Proxy'
     };
 
-    // 【修复 1】解决私有仓库 CDN 拦截问题，直接拿 GitHub 官方带鉴权的直链
     if (!nocache) {
       const checkGitRes = await fetch(gitApiUrl, { headers: gitHeaders });
       if (checkGitRes.status === 200) {
-        console.log(`命中缓存: 返回 ${fileName}`);
+        console.log(`命中极速缓存 (Tag: ${hashStr}): 返回 ${fileName}`);
         const gitData = await checkGitRes.json();
         if (gitData.download_url) {
           return res.redirect(302, gitData.download_url);
@@ -75,7 +77,15 @@ app.get(["/", "/generate"], async (req, res) => {
       }
     }
 
-    console.log(`未命中缓存，调用 NovelAI: ${fileName}`);
+    console.log(`未命中缓存，开始用最新参数画新图 (Tag: ${hashStr})`);
+
+    const isV4 = model.includes("nai-diffusion-4");
+    const aiParams = { width, height, steps, scale, sampler, negative_prompt };
+
+    if (isV4) {
+      aiParams.v4_prompt = { caption: { base_caption: finalInput, char_captions: [] } };
+      aiParams.v4_negative_prompt = { caption: { base_caption: negative_prompt, char_captions: [] } };
+    }
 
     const naiRes = await fetch("https://image.novelai.net/ai/generate-image", {
       method: "POST",
@@ -87,7 +97,7 @@ app.get(["/", "/generate"], async (req, res) => {
         input: finalInput,
         model: model,
         action: "generate",
-        parameters: { width, height, steps, scale, sampler, negative_prompt }
+        parameters: aiParams
       })
     });
 
@@ -101,16 +111,24 @@ app.get(["/", "/generate"], async (req, res) => {
     
     if (imageFiles.length === 0) throw new Error("解压失败，未找到图片");
     const imgBuffer = await imageFiles[0].async("nodebuffer");
-
     const base64Img = imgBuffer.toString('base64');
     
-    // 取消了固定上传 main 分支的限制，兼容叫 master 分支的旧仓库
+    // 【修改点】：如果 GitHub 里已经有旧图，允许强行覆盖上传 (用于 nocache=1 时)
+    let sha = undefined;
+    if (nocache) {
+        const checkExist = await fetch(gitApiUrl, { headers: gitHeaders });
+        if (checkExist.status === 200) {
+            sha = (await checkExist.json()).sha;
+        }
+    }
+
     fetch(gitApiUrl, {
       method: 'PUT',
       headers: { ...gitHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        message: `Auto-upload: ${fileName}`,
-        content: base64Img
+        message: `Auto-upload/Update: ${fileName}`,
+        content: base64Img,
+        sha: sha // 如果强制刷新，带上旧文件的 sha 以覆盖
       })
     }).catch(err => console.error("Git 上传异常:", err.message));
 
