@@ -35,7 +35,7 @@ app.get(["/", "/generate"], async (req, res) => {
     const scale = parseFloat(req.query.scale || req.query.cfg) || 5.0; 
     const negative_prompt = req.query.negative || "";
     const noise_schedule = req.query.noise_schedule || "karras";
-    const nocache = req.query.nocache === "0"; 
+    const nocache = req.query.nocache === "1"; 
 
     let width = 1024; let height = 1024;
     const sizeParam = req.query.size;
