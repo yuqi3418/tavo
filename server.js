@@ -65,15 +65,15 @@ app.get(["/", "/generate"], async (req, res) => {
     if (!nocache) {
       const checkGitRes = await fetch(gitApiUrl, { headers: gitHeaders });
       if (checkGitRes.status === 200) {
-        console.log(`命中极速缓存 (Tag: ${hashStr}): 准备通过 CDN 返回 ${fileName}`);
+        console.log(`命中缓存 (Tag: ${hashStr}): 准备通过 CDN 返回 ${fileName}`);
         
         // ==========================================
         // 【CDN 提速核心代码】
         // 彻底抛弃 GitHub 原始龟速链接，换用 jsDelivr 全球加速
         // 格式: https://cdn.jsdelivr.net/gh/用户名/仓库名/文件路径
         // ==========================================
-        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GIT_REPO}/${filePath}`;
-        return res.redirect(302, cdnUrl);
+        const gitRawUrl = `https://raw.githubusercontent.com/${GIT_REPO}/main/${filePath}`;
+return res.redirect(302, gitRawUrl);
       }
     }
 
