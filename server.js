@@ -21,9 +21,13 @@ app.get(["/", "/generate"], async (req, res) => {
     const GIT_TOKEN = req.query.git_token;
     const GIT_REPO = req.query.git_repo;
 
-    if (!NAI_KEY || !GIT_TOKEN || !GIT_REPO) {
-      return res.status(400).send("参数缺失：请检查 token, git_token, git_repo");
+    // 【改动 1】只强制要求提供 NovelAI 的 Token
+    if (!NAI_KEY) {
+      return res.status(400).send("参数缺失：请提供 token (NovelAI Key)");
     }
+
+    // 【改动 2】智能判断是否启用了 Git 存储功能
+    const useGit = Boolean(GIT_TOKEN && GIT_REPO);
 
     const tag = req.query.tag || "";
     const artist = req.query.artist || "";
@@ -56,28 +60,30 @@ app.get(["/", "/generate"], async (req, res) => {
     const fileName = `${cacheHash}.png`;
     const filePath = `images/${fileName}`; 
 
-    const gitApiUrl = `https://api.github.com/repos/${GIT_REPO}/contents/${filePath}`;
-    const gitHeaders = {
-      'Authorization': `token ${GIT_TOKEN}`,
-      'User-Agent': 'Tavo-Proxy'
-    };
+    let gitApiUrl, gitHeaders;
+    
+    // 如果启用了 Git，才初始化这些变量
+    if (useGit) {
+      gitApiUrl = `https://api.github.com/repos/${GIT_REPO}/contents/${filePath}`;
+      gitHeaders = {
+        'Authorization': `token ${GIT_TOKEN}`,
+        'User-Agent': 'Tavo-Proxy'
+      };
+    }
 
-    if (!nocache) {
+    // 【改动 3】只有启用了 Git，才去检查有没有缓存
+    if (!nocache && useGit) {
       const checkGitRes = await fetch(gitApiUrl, { headers: gitHeaders });
       if (checkGitRes.status === 200) {
         console.log(`命中缓存 (Tag: ${hashStr}): 准备通过 CDN 返回 ${fileName}`);
-        
-        // ==========================================
-        // 【CDN 提速核心代码】
-        // 彻底抛弃 GitHub 原始龟速链接，换用 jsDelivr 全球加速
-        // 格式: https://cdn.jsdelivr.net/gh/用户名/仓库名/文件路径
-        // ==========================================
         const gitRawUrl = `https://cdn.jsdelivr.net/gh/${GIT_REPO}/main/${filePath}`;
-return res.redirect(302, gitRawUrl);
+        return res.redirect(302, gitRawUrl);
       }
     }
 
-    console.log(`未命中缓存，开始用最新参数画新图 (Tag: ${hashStr})`);
+    // 如果没开 Git，或者开了没命中，就走正常画图流程
+    const logMsg = useGit ? "未命中缓存" : "未启用 Git 缓存";
+    console.log(`${logMsg}，开始画新图 (Tag: ${hashStr})`);
 
     const isV4 = model.includes("nai-diffusion-4");
     const aiParams = { width, height, steps, scale, sampler, negative_prompt, noise_schedule };
@@ -111,26 +117,30 @@ return res.redirect(302, gitRawUrl);
     
     if (imageFiles.length === 0) throw new Error("解压失败，未找到图片");
     const imgBuffer = await imageFiles[0].async("nodebuffer");
-    const base64Img = imgBuffer.toString('base64');
     
-    let sha = undefined;
-    if (nocache) {
-        const checkExist = await fetch(gitApiUrl, { headers: gitHeaders });
-        if (checkExist.status === 200) {
-            sha = (await checkExist.json()).sha;
-        }
+    // 【改动 4】只有启用了 Git，才去执行上传操作
+    if (useGit) {
+      const base64Img = imgBuffer.toString('base64');
+      let sha = undefined;
+      if (nocache) {
+          const checkExist = await fetch(gitApiUrl, { headers: gitHeaders });
+          if (checkExist.status === 200) {
+              sha = (await checkExist.json()).sha;
+          }
+      }
+
+      fetch(gitApiUrl, {
+        method: 'PUT',
+        headers: { ...gitHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Auto-upload/Update: ${fileName}`,
+          content: base64Img,
+          sha: sha 
+        })
+      }).catch(err => console.error("Git 上传异常:", err.message));
     }
 
-    fetch(gitApiUrl, {
-      method: 'PUT',
-      headers: { ...gitHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: `Auto-upload/Update: ${fileName}`,
-        content: base64Img,
-        sha: sha 
-      })
-    }).catch(err => console.error("Git 上传异常:", err.message));
-
+    // 无论开没开 Git，最后都要把图发给用户
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("Content-Type", "image/png");
     return res.end(imgBuffer);
