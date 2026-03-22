@@ -72,7 +72,7 @@ app.get(["/", "/generate"], async (req, res) => {
         // 彻底抛弃 GitHub 原始龟速链接，换用 jsDelivr 全球加速
         // 格式: https://cdn.jsdelivr.net/gh/用户名/仓库名/文件路径
         // ==========================================
-        const gitRawUrl = `https://raw.githubusercontent.com/${GIT_REPO}/main/${filePath}`;
+        const gitRawUrl = `https://cdn.jsdelivr.net/gh/${GIT_REPO}/main/${filePath}`;
 return res.redirect(302, gitRawUrl);
       }
     }
