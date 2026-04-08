@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 app.get(["/", "/generate"], async (req, res) => {
   try {
-    if (Object.keys(req.query).length === 0) return res.send("节点运行中（支持429自动重试）");
+    if (Object.keys(req.query).length === 0) return res.send("Render 备份节点运行中（支持429自动重试）");
 
     const NAI_KEY = req.query.token || MY_NAI_KEY;
     const GIT_TOKEN = req.query.git_token || MY_GIT_TOKEN;
